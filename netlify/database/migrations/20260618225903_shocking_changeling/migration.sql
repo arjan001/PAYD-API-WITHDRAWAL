@@ -1,5 +1,6 @@
 CREATE TABLE "transactions" (
 	"id" serial PRIMARY KEY,
+	"user_id" integer,
 	"reference" text UNIQUE,
 	"correlator_id" text UNIQUE,
 	"type" text NOT NULL,
@@ -22,6 +23,7 @@ CREATE TABLE "transactions" (
 --> statement-breakpoint
 CREATE TABLE "credentials" (
 	"id" serial PRIMARY KEY,
+	"user_id" integer NOT NULL,
 	"payd_username" text NOT NULL,
 	"payd_password" text NOT NULL,
 	"payd_api_secret" text,
@@ -32,4 +34,16 @@ CREATE TABLE "credentials" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX "credentials_account_username_idx" ON "credentials" ("payd_account_username");
+CREATE TABLE "users" (
+	"id" serial PRIMARY KEY,
+	"name" text NOT NULL,
+	"email" text NOT NULL,
+	"password_hash" text NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX "credentials_user_id_idx" ON "credentials" ("user_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "users_email_idx" ON "users" ("email");--> statement-breakpoint
+ALTER TABLE "transactions" ADD CONSTRAINT "transactions_user_id_users_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id");--> statement-breakpoint
+ALTER TABLE "credentials" ADD CONSTRAINT "credentials_user_id_users_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id");
