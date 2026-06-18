@@ -8,17 +8,15 @@
     "./schema": "./src/schema/index.ts"
   },
   "scripts": {
-    "push": "drizzle-kit push --config ./drizzle.config.ts",
-    "push-force": "drizzle-kit push --force --config ./drizzle.config.ts"
+    "generate": "drizzle-kit generate --config ./drizzle.config.ts"
   },
   "dependencies": {
-    "pg": "^8.21.0",
+    "@netlify/database": "^1.0.0",
     "drizzle-orm": "catalog:",
     "drizzle-zod": "1.0.0-beta.14-a36c63d",
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@types/pg": "^8.15.6",
     "@types/node": "catalog:",
     "drizzle-kit": "1.0.0-beta.22"
   }
