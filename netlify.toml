@@ -1,25 +1,40 @@
-# Netlify build configuration for the Payd Money Dashboard.
+# ─────────────────────────────────────────────────────────────────────────────
+# Netlify configuration for Payd Dashboard
 #
-# The React/Vite dashboard is published as a static site, and the Express
-# API server runs as a Netlify Function (netlify/functions/api.mts).
+# Architecture:
+#   • The React/Vite dashboard is built as a static site, served by CDN.
+#   • The Express API runs as a Netlify Function (netlify/functions/api.mts).
+#     All /api/* requests are proxied there automatically.
+#   • PostgreSQL must be an external managed database (Supabase, Neon, etc.)
+#     — set DATABASE_URL in Netlify → Site → Environment Variables.
+# ─────────────────────────────────────────────────────────────────────────────
 
 [build]
-  command = "PORT=3000 BASE_PATH=/ pnpm --filter @workspace/dashboard run build"
-  publish = "artifacts/dashboard/dist/public"
+  # Netlify auto-detects pnpm from pnpm-lock.yaml, but we include the install
+  # step explicitly so workspace symlinks are always wired up correctly.
+  command = "pnpm install --frozen-lockfile && PORT=3000 BASE_PATH=/ pnpm --filter @workspace/dashboard run build"
+  publish  = "artifacts/dashboard/dist/public"
+
+[build.environment]
+  NODE_VERSION = "20"
+  PNPM_VERSION = "10"
+  NODE_ENV     = "production"
 
 [functions]
-  directory = "netlify/functions"
+  directory    = "netlify/functions"
   node_bundler = "esbuild"
 
-# Forward all API calls to the Express server running as a function.
-[[redirects]]
-  from = "/api/*"
-  to = "/.netlify/functions/api/:splat"
-  status = 200
-  force = true
+# ── Routing ───────────────────────────────────────────────────────────────────
 
-# SPA fallback: serve the dashboard's index.html for client-side routes.
+# All /api/* calls → Netlify Function (Express server).
 [[redirects]]
-  from = "/*"
-  to = "/index.html"
+  from   = "/api/*"
+  to     = "/.netlify/functions/api/:splat"
+  status = 200
+  force  = true
+
+# SPA fallback — React Router handles all other client-side routes.
+[[redirects]]
+  from   = "/*"
+  to     = "/index.html"
   status = 200
