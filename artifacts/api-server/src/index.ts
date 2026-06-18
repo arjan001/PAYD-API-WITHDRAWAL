@@ -1,3 +1,9 @@
+// Load .env file in local development (ignored in production where env vars
+// are injected by the platform). Must run before any other imports that read
+// process.env so all variables are available immediately.
+import { config as loadEnv } from "dotenv";
+loadEnv();
+
 import app from "./app";
 import { logger } from "./lib/logger";
 import { initializeDatabase } from "@workspace/db";
