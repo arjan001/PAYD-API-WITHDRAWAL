@@ -12,16 +12,14 @@
     "push-force": "drizzle-kit push --force --config ./drizzle.config.ts"
   },
   "dependencies": {
-    "pg": "^8.13.1",
+    "pg": "^8.21.0",
     "drizzle-orm": "catalog:",
     "drizzle-zod": "1.0.0-beta.14-a36c63d",
-    "pg": "^8.21.0",
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@types/pg": "^8.11.14",
-    "@types/node": "catalog:",
     "@types/pg": "^8.15.6",
+    "@types/node": "catalog:",
     "drizzle-kit": "1.0.0-beta.22"
   }
 }

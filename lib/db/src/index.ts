@@ -11,7 +11,27 @@ if (!connectionString) {
   );
 }
 
-const pool = new pg.Pool({ connectionString });
+// Enable SSL automatically for non-local hosts (required by Supabase, Neon,
+// Replit-managed Postgres in production, and most hosted providers).
+// Disabled for localhost/127.0.0.1 so local dev without SSL still works.
+function buildSslConfig(connStr: string): pg.PoolConfig["ssl"] {
+  try {
+    const url = new URL(connStr);
+    const host = url.hostname;
+    const sslmode = url.searchParams.get("sslmode");
+    if (sslmode === "disable") return false;
+    if (sslmode === "require" || sslmode === "verify-ca" || sslmode === "verify-full") {
+      return { rejectUnauthorized: false };
+    }
+    if (host === "localhost" || host === "127.0.0.1") return undefined;
+    // Non-local host — require SSL (rejectUnauthorized:false handles self-signed certs)
+    return { rejectUnauthorized: false };
+  } catch {
+    return undefined;
+  }
+}
+
+const pool = new pg.Pool({ connectionString, ssl: buildSslConfig(connectionString) });
 
 export const db = drizzle(pool, { schema });
 
