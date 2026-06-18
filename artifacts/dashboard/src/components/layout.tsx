@@ -25,7 +25,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       <aside className="w-64 border-r border-border bg-card flex flex-col">
         <div className="p-6">
           <Link href="/" className="flex items-center gap-3 hover:opacity-80 transition-opacity">
-            <img src="/logo.png" alt="Payd" className="h-10 w-auto" />
+            <img src="/logo.png" alt="Payd" className="h-16 w-auto" />
           </Link>
         </div>
 

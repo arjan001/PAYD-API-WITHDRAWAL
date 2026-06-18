@@ -124,7 +124,7 @@ function AuthScreen({ onLogin }: { onLogin: (user: AuthUser) => void }) {
       <div className="w-full max-w-sm relative">
         {/* Logo / Brand */}
         <div className="flex flex-col items-center mb-8">
-          <img src="/logo.png" alt="Payd" className="h-12 w-auto mb-4" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+          <img src="/logo.png" alt="Payd" className="h-24 w-auto mb-4" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
           <h1 className="text-2xl font-bold tracking-tight text-foreground">
             {mode === "register" ? "Create your account" : mode === "registered" ? "Account created!" : "Sign in to Payd"}
           </h1>
