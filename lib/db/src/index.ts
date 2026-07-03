@@ -4,11 +4,11 @@ import pg from "pg";
 import * as schema from "./schema";
 export { systemSettingsTable } from "./schema";
 
-const rawConnectionString = process.env.DATABASE_URL || process.env.SUPABASE_DB_URL;
+const rawConnectionString = process.env.DATABASE_URL;
 
 if (!rawConnectionString) {
   throw new Error(
-    "No database connection string found. Set DATABASE_URL or SUPABASE_DB_URL.",
+    "DATABASE_URL is not set. Replit injects this automatically — check that the built-in PostgreSQL database is provisioned.",
   );
 }
 
