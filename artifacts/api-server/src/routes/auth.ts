@@ -2,26 +2,9 @@ import { Router, type IRouter, type Request, type Response } from "express";
 import bcrypt from "bcryptjs";
 import { db, usersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
-import { sql as dsql } from "drizzle-orm";
 import { signToken, verifyToken, SESSION_COOKIE, COOKIE_OPTS } from "../middlewares/auth";
 
 const router: IRouter = Router();
-
-async function ensureUsersTable() {
-  await db.execute(dsql`
-    CREATE TABLE IF NOT EXISTS "users" (
-      "id" serial PRIMARY KEY NOT NULL,
-      "name" text NOT NULL,
-      "email" text NOT NULL,
-      "password_hash" text NOT NULL,
-      "created_at" timestamp with time zone DEFAULT now() NOT NULL,
-      "updated_at" timestamp with time zone DEFAULT now() NOT NULL
-    )
-  `);
-  await db.execute(dsql`
-    CREATE UNIQUE INDEX IF NOT EXISTS "users_email_idx" ON "users" USING btree ("email")
-  `);
-}
 
 // GET /api/auth/me
 router.get("/auth/me", (req: Request, res: Response): void => {
@@ -35,7 +18,6 @@ router.get("/auth/me", (req: Request, res: Response): void => {
 // POST /api/auth/register
 router.post("/auth/register", async (req: Request, res: Response): Promise<void> => {
   try {
-    await ensureUsersTable();
     const { name, email, password } = req.body as Record<string, string>;
     if (!name?.trim() || !email?.trim() || !password) {
       res.status(400).json({ error: "Name, email and password are required" });
@@ -69,7 +51,6 @@ router.post("/auth/register", async (req: Request, res: Response): Promise<void>
 // POST /api/auth/login
 router.post("/auth/login", async (req: Request, res: Response): Promise<void> => {
   try {
-    await ensureUsersTable();
     const { email, password } = req.body as Record<string, string>;
     if (!email?.trim() || !password) {
       res.status(400).json({ error: "Email and password are required" });

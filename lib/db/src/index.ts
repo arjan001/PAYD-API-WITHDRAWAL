@@ -12,23 +12,19 @@ if (!connectionString) {
   );
 }
 
-// Enable SSL automatically for non-local hosts (required by Supabase, Neon,
-// Replit-managed Postgres in production, and most hosted providers).
-// Disabled for localhost/127.0.0.1 so local dev without SSL still works.
+// Enable SSL for all connections by default.
+// Replit-managed Postgres (both dev and deployed) requires SSL even on localhost.
+// Only opt out with explicit sslmode=disable in the connection string.
 function buildSslConfig(connStr: string): pg.PoolConfig["ssl"] {
   try {
     const url = new URL(connStr);
-    const host = url.hostname;
     const sslmode = url.searchParams.get("sslmode");
     if (sslmode === "disable") return false;
-    if (sslmode === "require" || sslmode === "verify-ca" || sslmode === "verify-full") {
-      return { rejectUnauthorized: false };
-    }
-    if (host === "localhost" || host === "127.0.0.1") return undefined;
-    // Non-local host — require SSL (rejectUnauthorized:false handles self-signed certs)
+    // Always use SSL — rejectUnauthorized:false handles self-signed certs
     return { rejectUnauthorized: false };
   } catch {
-    return undefined;
+    // If we can't parse the URL, try SSL anyway
+    return { rejectUnauthorized: false };
   }
 }
 
