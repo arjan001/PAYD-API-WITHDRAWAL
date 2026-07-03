@@ -33,7 +33,7 @@ externalPort = 80
 [userenv]
 
 [userenv.shared]
-NODE_ENV = "development"
+NODE_ENV = "production"
 PORT = "8080"
 
 [nix]
