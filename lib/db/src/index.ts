@@ -4,31 +4,39 @@ import pg from "pg";
 import * as schema from "./schema";
 export { systemSettingsTable } from "./schema";
 
-const connectionString = process.env.DATABASE_URL || process.env.SUPABASE_DB_URL;
+const rawConnectionString = process.env.DATABASE_URL || process.env.SUPABASE_DB_URL;
 
-if (!connectionString) {
+if (!rawConnectionString) {
   throw new Error(
     "No database connection string found. Set DATABASE_URL or SUPABASE_DB_URL.",
   );
 }
 
-// Enable SSL for all connections by default.
-// Replit-managed Postgres (both dev and deployed) requires SSL even on localhost.
-// Only opt out with explicit sslmode=disable in the connection string.
-function buildSslConfig(connStr: string): pg.PoolConfig["ssl"] {
+// Force SSL in the connection URL so pg's own URL parser also sees sslmode=require.
+// pg parses the connectionString internally and its sslmode logic can override the
+// explicit `ssl` pool config option — injecting it into the URL fixes both code paths.
+// The only exception is explicit sslmode=disable (local dev opt-out).
+function injectSsl(connStr: string): { connectionString: string; ssl: pg.PoolConfig["ssl"] } {
   try {
     const url = new URL(connStr);
     const sslmode = url.searchParams.get("sslmode");
-    if (sslmode === "disable") return false;
-    // Always use SSL — rejectUnauthorized:false handles self-signed certs
-    return { rejectUnauthorized: false };
+    if (sslmode === "disable") {
+      return { connectionString: connStr, ssl: false };
+    }
+    // Overwrite to require — this is read by pg's own URL parser
+    url.searchParams.set("sslmode", "require");
+    return {
+      connectionString: url.toString(),
+      ssl: { rejectUnauthorized: false },
+    };
   } catch {
-    // If we can't parse the URL, try SSL anyway
-    return { rejectUnauthorized: false };
+    // URL parse failed — pass as-is with explicit ssl config
+    return { connectionString: connStr, ssl: { rejectUnauthorized: false } };
   }
 }
 
-const pool = new pg.Pool({ connectionString, ssl: buildSslConfig(connectionString) });
+const { connectionString, ssl: poolSsl } = injectSsl(rawConnectionString);
+const pool = new pg.Pool({ connectionString, ssl: poolSsl });
 
 export const db = drizzle(pool, { schema });
 
