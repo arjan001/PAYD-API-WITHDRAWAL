@@ -36,6 +36,8 @@ externalPort = 80
 PAYD_ACCOUNT_USERNAME = "techlink"
 PAYHERO_AUTH_TOKEN = "Basic ejRQQnhBcU1lRlZSZG5Zc3pCMDA6S2RUdGQzSWhUd3F1RU01bjNkMDVNUFF4aDBGVmRiZzJKN3B1bWFlWQ=="
 PAYHERO_CHANNEL_ID = "5635"
+NODE_ENV = "development"
+PORT = "8080"
 
 [nix]
 channel = "stable-25_05"

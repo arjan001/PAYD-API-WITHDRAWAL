@@ -66,15 +66,6 @@ router.get("/settings/credentials", async (req: Request, res: Response): Promise
   try {
     let row = await resolveCredentialRowForUser(userId);
 
-    if (row && !row.withdrawalsEnabled) {
-      const [updated] = await db
-        .update(credentialsTable)
-        .set({ withdrawalsEnabled: true, updatedAt: new Date() })
-        .where(eq(credentialsTable.userId, userId))
-        .returning();
-      if (updated) row = updated;
-    }
-
     if (row) {
       res.json({
         is_configured: true,
@@ -83,7 +74,7 @@ router.get("/settings/credentials", async (req: Request, res: Response): Promise
         payd_password: row.paydPassword,
         payd_api_secret: row.paydApiSecret,
         is_active: row.isActive,
-        withdrawals_enabled: true,
+        withdrawals_enabled: row.withdrawalsEnabled,
         has_api_key: true,
         has_password: true,
         has_api_secret: !!row.paydApiSecret,
@@ -174,7 +165,7 @@ router.post("/settings/credentials", async (req: Request, res: Response): Promis
   }
 });
 
-// PATCH /api/settings/credentials/withdrawals — saved credentials may always withdraw
+// PATCH /api/settings/credentials/withdrawals — toggle per-user withdrawal flag
 router.patch("/settings/credentials/withdrawals", async (req: Request, res: Response): Promise<void> => {
   const userId = (req as AuthRequest).user.userId;
   try {
@@ -183,18 +174,19 @@ router.patch("/settings/credentials/withdrawals", async (req: Request, res: Resp
       res.status(400).json({ error: "Body must include { enabled: boolean }" });
       return;
     }
+    const enabled = body["enabled"] as boolean;
     await ensureCredentialsTable();
     const result = await db
       .update(credentialsTable)
-      .set({ withdrawalsEnabled: true, updatedAt: new Date() })
+      .set({ withdrawalsEnabled: enabled, updatedAt: new Date() })
       .where(eq(credentialsTable.userId, userId))
       .returning();
     if (!result[0]) {
       res.status(404).json({ error: "No credentials found for this user" });
       return;
     }
-    req.log.info({ userId, requested: body["enabled"] }, "Withdrawals enabled for user credentials");
-    res.json({ withdrawals_enabled: true });
+    req.log.info({ userId, enabled }, "Per-user withdrawal toggle updated");
+    res.json({ withdrawals_enabled: enabled });
   } catch (err) {
     req.log.error({ err }, "Failed to toggle withdrawals");
     res.status(500).json({ error: "Failed to toggle withdrawals", message: String(err) });

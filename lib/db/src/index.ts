@@ -2,6 +2,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { sql as dsql } from "drizzle-orm";
 import pg from "pg";
 import * as schema from "./schema";
+export { systemSettingsTable } from "./schema";
 
 const connectionString = process.env.DATABASE_URL || process.env.SUPABASE_DB_URL;
 
@@ -98,10 +99,11 @@ async function _run(): Promise<void> {
     EXCEPTION WHEN duplicate_column THEN NULL;
     END $$
   `);
-  // Backfill user_id on legacy credential rows by matching account username to user name or email
+  // Backfill user_id on legacy credential rows by matching account username to user name or email.
+  // Only sets user_id — withdrawal flag is left as-is so explicit admin overrides are preserved.
   await db.execute(dsql`
     UPDATE "credentials" AS c
-    SET "user_id" = u."id", "withdrawals_enabled" = true
+    SET "user_id" = u."id"
     FROM "users" AS u
     WHERE c."user_id" IS NULL
       AND (
@@ -111,15 +113,24 @@ async function _run(): Promise<void> {
         OR LOWER(split_part(u."email", '@', 1)) = LOWER(c."payd_username")
       )
   `);
-  // Ensure every linked credential can withdraw with its own API keys
+
+  // 3. system_settings — single-row global config (global_withdrawals_enabled, etc.)
   await db.execute(dsql`
-    UPDATE "credentials"
-    SET "withdrawals_enabled" = true
-    WHERE "user_id" IS NOT NULL
-      AND "withdrawals_enabled" = false
+    CREATE TABLE IF NOT EXISTS "system_settings" (
+      "id"         serial PRIMARY KEY NOT NULL,
+      "key"        text NOT NULL UNIQUE,
+      "value"      text NOT NULL,
+      "updated_at" timestamp with time zone DEFAULT now() NOT NULL
+    )
+  `);
+  // Seed the default global withdrawal toggle if not yet present
+  await db.execute(dsql`
+    INSERT INTO "system_settings" ("key", "value")
+    VALUES ('global_withdrawals_enabled', 'true')
+    ON CONFLICT ("key") DO NOTHING
   `);
 
-  // 3. transactions — scoped per user
+  // 4. transactions — scoped per user
   await db.execute(dsql`
     CREATE TABLE IF NOT EXISTS "transactions" (
       "id"                   serial PRIMARY KEY NOT NULL,
@@ -167,6 +178,30 @@ export async function dropLegacyPaydAccountUsernameConstraint(): Promise<void> {
 // Backward-compat alias used in routes that call ensureCredentialsTable()
 export function ensureCredentialsTable(): Promise<void> {
   return initializeDatabase();
+}
+
+// ─── Global withdrawal toggle helpers ────────────────────────────────────────
+
+/** Returns true if system-wide withdrawals are enabled (default: true). */
+export async function getGlobalWithdrawalsEnabled(): Promise<boolean> {
+  try {
+    const rows = await db.execute(
+      dsql`SELECT "value" FROM "system_settings" WHERE "key" = 'global_withdrawals_enabled' LIMIT 1`,
+    );
+    const row = (rows as { rows: Array<{ value: string }> }).rows[0];
+    return row ? row.value !== "false" : true;
+  } catch {
+    return true; // fail-open if table not yet created
+  }
+}
+
+/** Set system-wide withdrawals enabled flag. */
+export async function setGlobalWithdrawalsEnabled(enabled: boolean): Promise<void> {
+  await db.execute(
+    dsql`INSERT INTO "system_settings" ("key", "value")
+         VALUES ('global_withdrawals_enabled', ${enabled ? "true" : "false"})
+         ON CONFLICT ("key") DO UPDATE SET "value" = EXCLUDED."value", "updated_at" = now()`,
+  );
 }
 
 export * from "./schema";

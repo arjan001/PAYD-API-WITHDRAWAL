@@ -20,3 +20,4 @@
 export * from "./transactions";
 export * from "./credentials";
 export * from "./users";
+export * from "./system-settings";

@@ -16,7 +16,7 @@ import {
   InitiateP2PTransferResponse,
   GetTransactionStatusResponse,
 } from "@workspace/api-zod";
-import { db, credentialsTable, transactionsTable } from "@workspace/db";
+import { db, credentialsTable, transactionsTable, getGlobalWithdrawalsEnabled } from "@workspace/db";
 import {
   getPaydClientForUser,
   getCredentialRowByUserId,
@@ -234,14 +234,28 @@ router.post("/payd/payout", async (req: Request, res: Response): Promise<void> =
       return;
     }
 
-    let credRow = await getCredentialRowByUserId(userId);
+    // Check global withdrawal toggle first
+    const globalEnabled = await getGlobalWithdrawalsEnabled();
+    if (!globalEnabled) {
+      req.log.warn({ userId }, "Payout blocked: global withdrawals disabled by admin");
+      res.status(403).json({
+        error: "Withdrawals disabled",
+        message: "Withdrawals are currently disabled system-wide. Please contact an administrator.",
+        success: false,
+      });
+      return;
+    }
+
+    const credRow = await getCredentialRowByUserId(userId);
+    // Check per-user withdrawal toggle
     if (credRow && !credRow.withdrawalsEnabled) {
-      const [updated] = await db
-        .update(credentialsTable)
-        .set({ withdrawalsEnabled: true, updatedAt: new Date() })
-        .where(eq(credentialsTable.userId, userId))
-        .returning();
-      if (updated) credRow = updated;
+      req.log.warn({ userId }, "Payout blocked: withdrawals disabled for this user");
+      res.status(403).json({
+        error: "Withdrawals disabled",
+        message: "Withdrawals are not enabled for your account. Enable them in Settings.",
+        success: false,
+      });
+      return;
     }
 
     const { phone_number, amount, currency = "KES", network_code = "MPESA", narration } = parsed.data;

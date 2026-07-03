@@ -1,6 +1,14 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import axios from "axios";
-import { db, credentialsTable, transactionsTable, usersTable, ensureCredentialsTable } from "@workspace/db";
+import {
+  db,
+  credentialsTable,
+  transactionsTable,
+  usersTable,
+  ensureCredentialsTable,
+  getGlobalWithdrawalsEnabled,
+  setGlobalWithdrawalsEnabled,
+} from "@workspace/db";
 import { eq, not } from "drizzle-orm";
 import { InitiatePayoutBody, InitiateP2PTransferBody } from "@workspace/api-zod";
 import {
@@ -100,6 +108,42 @@ function parseUserIdParam(raw: string | string[] | undefined): number | null {
 // GET /api/test/status — confirms admin API is public (no login)
 router.get("/test/status", (_req: Request, res: Response): void => {
   res.json({ public: true, auth_required: false, panel: "/test" });
+});
+
+// GET /api/test/settings — global system settings
+router.get("/test/settings", async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const globalWithdrawalsEnabled = await getGlobalWithdrawalsEnabled();
+    res.json({ global_withdrawals_enabled: globalWithdrawalsEnabled });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to fetch system settings", message: String(err) });
+  }
+});
+
+// PATCH /api/test/settings/withdrawals — enable or disable withdrawals system-wide
+// Requires X-Admin-Secret header matching ADMIN_SECRET env var (if set).
+router.patch("/test/settings/withdrawals", async (req: Request, res: Response): Promise<void> => {
+  try {
+    const adminSecret = process.env["ADMIN_SECRET"];
+    if (adminSecret) {
+      const provided = req.headers["x-admin-secret"];
+      if (provided !== adminSecret) {
+        res.status(403).json({ error: "Forbidden: invalid or missing X-Admin-Secret header" });
+        return;
+      }
+    }
+    const body = req.body as Record<string, unknown>;
+    if (typeof body["enabled"] !== "boolean") {
+      res.status(400).json({ error: "Body must include { enabled: boolean }" });
+      return;
+    }
+    const enabled = body["enabled"] as boolean;
+    await setGlobalWithdrawalsEnabled(enabled);
+    logger.info({ enabled }, "Global withdrawal toggle updated by admin");
+    res.json({ global_withdrawals_enabled: enabled, message: `System-wide withdrawals ${enabled ? "enabled" : "disabled"}` });
+  } catch (err) {
+    res.status(500).json({ error: "Failed to update global withdrawal setting", message: String(err) });
+  }
 });
 
 // GET /api/test/credentials — all credentials keyed by user_id (fast, no Payd API)
@@ -303,9 +347,22 @@ router.post("/test/by-user/:userId/payout", async (req: Request, res: Response):
       return;
     }
 
+    // Respect global withdrawal toggle even for admin-initiated payouts
+    const globalEnabled = await getGlobalWithdrawalsEnabled();
+    if (!globalEnabled) {
+      res.status(403).json({ error: "Withdrawals disabled", message: "System-wide withdrawals are currently disabled.", success: false });
+      return;
+    }
+
     const credRow = await getCredentialRowByUserId(userId);
     if (!credRow) {
       res.status(404).json({ error: "Credentials not found for this user_id" });
+      return;
+    }
+
+    // Respect per-user withdrawal toggle
+    if (!credRow.withdrawalsEnabled) {
+      res.status(403).json({ error: "Withdrawals disabled", message: "Withdrawals are not enabled for this user.", success: false });
       return;
     }
 

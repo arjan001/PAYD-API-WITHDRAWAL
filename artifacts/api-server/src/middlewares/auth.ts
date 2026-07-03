@@ -1,7 +1,10 @@
 import { type Request, type Response, type NextFunction } from "express";
 import jwt from "jsonwebtoken";
 
-export const JWT_SECRET = process.env["JWT_SECRET"] ?? "payd-dev-secret-change-in-prod";
+export const JWT_SECRET =
+  process.env["JWT_SECRET"] ??
+  process.env["SESSION_SECRET"] ??
+  "payd-dev-secret-change-in-prod";
 export const SESSION_COOKIE = "payd_session";
 export const COOKIE_OPTS = {
   httpOnly: true,

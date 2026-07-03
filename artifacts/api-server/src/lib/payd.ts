@@ -236,9 +236,7 @@ export async function fetchAccountBalances(client: PaydClient): Promise<AccountB
 }
 
 function clientFromRow(row: typeof credentialsTable.$inferSelect): PaydClient {
-  const creds = rowToCredentials(row);
-  creds.withdrawalsEnabled = true;
-  return buildClient(creds);
+  return buildClient(rowToCredentials(row));
 }
 
 /**
