@@ -7,14 +7,12 @@ export { systemSettingsTable } from "./schema";
 // Replit runtime-injects PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE.
 // pg reads those env vars automatically when no connectionString is given — no URL needed.
 //
-// SSL notes:
-//   - Dev: Replit's local PostgreSQL has no SSL listener → ssl: false
-//   - Production: Replit's managed PostgreSQL requires SSL but uses an internal/self-signed
-//     certificate that cannot be verified with a public CA. rejectUnauthorized: false is the
-//     only option for Replit-hosted databases; the connection is still encrypted in transit.
-const isProduction = process.env["NODE_ENV"] === "production";
+// SSL notes: Replit's managed PostgreSQL (both dev and prod) runs on the same internal host
+// ("helium") and supports SSL with a self-signed/internal certificate. Production REQUIRES
+// SSL; dev accepts but does not require it. Using ssl: { rejectUnauthorized: false }
+// unconditionally works in both environments and avoids any NODE_ENV guessing.
 const pool = new pg.Pool({
-  ssl: isProduction ? { rejectUnauthorized: false } : false,
+  ssl: { rejectUnauthorized: false },
 });
 
 export const db = drizzle(pool, { schema });
