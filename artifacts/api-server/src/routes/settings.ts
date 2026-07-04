@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from "express";
-import { db, credentialsTable, ensureCredentialsTable, dropLegacyPaydAccountUsernameConstraint } from "@workspace/db";
+import { db, credentialsTable, ensureCredentialsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { type AuthRequest } from "../middlewares/auth";
 import { resolveCredentialRowForUser, getCredentialRowByUserId } from "../lib/payd";
@@ -100,7 +100,6 @@ router.post("/settings/credentials", async (req: Request, res: Response): Promis
     }
 
     await ensureCredentialsTable();
-    await dropLegacyPaydAccountUsernameConstraint();
 
     const { payd_username, payd_password, payd_api_secret, payd_account_username } = parsed;
     const credentialPatch = {
@@ -132,7 +131,6 @@ router.post("/settings/credentials", async (req: Request, res: Response): Promis
       } catch (err) {
         const pgCode = (err as { code?: string }).code;
         if (pgCode === "23505") {
-          await dropLegacyPaydAccountUsernameConstraint();
           [saved] = await insertRow();
         } else {
           throw err;

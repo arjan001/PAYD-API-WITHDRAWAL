@@ -4,54 +4,28 @@ import pg from "pg";
 import * as schema from "./schema";
 export { systemSettingsTable } from "./schema";
 
-const rawConnectionString = process.env.DATABASE_URL;
-
-if (!rawConnectionString) {
-  throw new Error(
-    "DATABASE_URL is not set. Replit injects this automatically — check that the built-in PostgreSQL database is provisioned.",
-  );
-}
-
-// Force SSL in the connection URL so pg's own URL parser also sees sslmode=require.
-// pg parses the connectionString internally and its sslmode logic can override the
-// explicit `ssl` pool config option — injecting it into the URL fixes both code paths.
-// The only exception is explicit sslmode=disable (local dev opt-out).
-function injectSsl(connStr: string): { connectionString: string; ssl: pg.PoolConfig["ssl"] } {
-  try {
-    const url = new URL(connStr);
-    const sslmode = url.searchParams.get("sslmode");
-    if (sslmode === "disable") {
-      return { connectionString: connStr, ssl: false };
-    }
-    // Overwrite to require — this is read by pg's own URL parser
-    url.searchParams.set("sslmode", "require");
-    return {
-      connectionString: url.toString(),
-      ssl: { rejectUnauthorized: false },
-    };
-  } catch {
-    // URL parse failed — pass as-is with explicit ssl config
-    return { connectionString: connStr, ssl: { rejectUnauthorized: false } };
-  }
-}
-
-const { connectionString, ssl: poolSsl } = injectSsl(rawConnectionString);
-const pool = new pg.Pool({ connectionString, ssl: poolSsl });
+// Replit runtime-injects PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE.
+// pg reads those env vars automatically when no connectionString is given — no URL needed.
+//
+// SSL notes:
+//   - Dev: Replit's local PostgreSQL has no SSL listener → ssl: false
+//   - Production: Replit's managed PostgreSQL requires SSL but uses an internal/self-signed
+//     certificate that cannot be verified with a public CA. rejectUnauthorized: false is the
+//     only option for Replit-hosted databases; the connection is still encrypted in transit.
+const isProduction = process.env["NODE_ENV"] === "production";
+const pool = new pg.Pool({
+  ssl: isProduction ? { rejectUnauthorized: false } : false,
+});
 
 export const db = drizzle(pool, { schema });
 
 // ─── Auto-setup: idempotent full schema init ──────────────────────────────────
-// Called once at server startup. Safe to run on every boot — all statements
-// use IF NOT EXISTS / IF NOT EXISTS index guards, so re-running is a no-op.
-// When the project is forked or cloned and run fresh, this creates every table
-// and index automatically without any manual migration step.
-
 let _initPromise: Promise<void> | null = null;
 
 export function initializeDatabase(): Promise<void> {
   if (!_initPromise) {
     _initPromise = _run().catch((err) => {
-      _initPromise = null; // allow retry on transient failure
+      _initPromise = null;
       throw err;
     });
   }
@@ -59,7 +33,7 @@ export function initializeDatabase(): Promise<void> {
 }
 
 async function _run(): Promise<void> {
-  // 1. users — must exist before credentials (FK)
+  // 1. users
   await db.execute(dsql`
     CREATE TABLE IF NOT EXISTS "users" (
       "id"            serial PRIMARY KEY NOT NULL,
@@ -75,7 +49,7 @@ async function _run(): Promise<void> {
       ON "users" USING btree ("email")
   `);
 
-  // 2. credentials — scoped per user (one row per user)
+  // 2. credentials — one per user
   await db.execute(dsql`
     CREATE TABLE IF NOT EXISTS "credentials" (
       "id"                    serial PRIMARY KEY NOT NULL,
@@ -94,31 +68,21 @@ async function _run(): Promise<void> {
     CREATE UNIQUE INDEX IF NOT EXISTS "credentials_user_id_idx"
       ON "credentials" USING btree ("user_id")
   `);
-  // Same Payd wallet may be linked to multiple registered users — user_id is the only unique key
-  await dropLegacyPaydAccountUsernameConstraint();
-  // Add user_id column to existing installs that pre-date multi-tenancy
+  await db.execute(dsql`DROP INDEX IF EXISTS "credentials_account_username_idx"`);
+  await db.execute(dsql`
+    DO $$ BEGIN
+      ALTER TABLE "credentials" DROP CONSTRAINT IF EXISTS "credentials_payd_account_username_key";
+    EXCEPTION WHEN undefined_object THEN NULL;
+    END $$
+  `);
   await db.execute(dsql`
     DO $$ BEGIN
       ALTER TABLE "credentials" ADD COLUMN "user_id" integer REFERENCES "users"("id");
     EXCEPTION WHEN duplicate_column THEN NULL;
     END $$
   `);
-  // Backfill user_id on legacy credential rows by matching account username to user name or email.
-  // Only sets user_id — withdrawal flag is left as-is so explicit admin overrides are preserved.
-  await db.execute(dsql`
-    UPDATE "credentials" AS c
-    SET "user_id" = u."id"
-    FROM "users" AS u
-    WHERE c."user_id" IS NULL
-      AND (
-        LOWER(u."name") = LOWER(c."payd_account_username")
-        OR LOWER(split_part(u."email", '@', 1)) = LOWER(c."payd_account_username")
-        OR LOWER(u."name") = LOWER(c."payd_username")
-        OR LOWER(split_part(u."email", '@', 1)) = LOWER(c."payd_username")
-      )
-  `);
 
-  // 3. system_settings — single-row global config (global_withdrawals_enabled, etc.)
+  // 3. system_settings
   await db.execute(dsql`
     CREATE TABLE IF NOT EXISTS "system_settings" (
       "id"         serial PRIMARY KEY NOT NULL,
@@ -127,14 +91,13 @@ async function _run(): Promise<void> {
       "updated_at" timestamp with time zone DEFAULT now() NOT NULL
     )
   `);
-  // Seed the default global withdrawal toggle if not yet present
   await db.execute(dsql`
     INSERT INTO "system_settings" ("key", "value")
     VALUES ('global_withdrawals_enabled', 'true')
     ON CONFLICT ("key") DO NOTHING
   `);
 
-  // 4. transactions — scoped per user
+  // 4. transactions
   await db.execute(dsql`
     CREATE TABLE IF NOT EXISTS "transactions" (
       "id"                   serial PRIMARY KEY NOT NULL,
@@ -159,7 +122,6 @@ async function _run(): Promise<void> {
       "updated_at"           timestamp with time zone DEFAULT now() NOT NULL
     )
   `);
-  // Add user_id column to existing installs that pre-date multi-tenancy
   await db.execute(dsql`
     DO $$ BEGIN
       ALTER TABLE "transactions" ADD COLUMN "user_id" integer REFERENCES "users"("id");
@@ -168,25 +130,12 @@ async function _run(): Promise<void> {
   `);
 }
 
-/** Removes legacy uniqueness on payd_account_username so credentials are keyed by user_id only. */
-export async function dropLegacyPaydAccountUsernameConstraint(): Promise<void> {
-  await db.execute(dsql`DROP INDEX IF EXISTS "credentials_account_username_idx"`);
-  await db.execute(dsql`
-    DO $$ BEGIN
-      ALTER TABLE "credentials" DROP CONSTRAINT IF EXISTS "credentials_payd_account_username_key";
-    EXCEPTION WHEN undefined_object THEN NULL;
-    END $$
-  `);
-}
-
-// Backward-compat alias used in routes that call ensureCredentialsTable()
 export function ensureCredentialsTable(): Promise<void> {
   return initializeDatabase();
 }
 
-// ─── Global withdrawal toggle helpers ────────────────────────────────────────
+// ─── Global withdrawal toggle ─────────────────────────────────────────────────
 
-/** Returns true if system-wide withdrawals are enabled (default: true). */
 export async function getGlobalWithdrawalsEnabled(): Promise<boolean> {
   try {
     const rows = await db.execute(
@@ -195,11 +144,10 @@ export async function getGlobalWithdrawalsEnabled(): Promise<boolean> {
     const row = (rows as { rows: Array<{ value: string }> }).rows[0];
     return row ? row.value !== "false" : true;
   } catch {
-    return true; // fail-open if table not yet created
+    return true;
   }
 }
 
-/** Set system-wide withdrawals enabled flag. */
 export async function setGlobalWithdrawalsEnabled(enabled: boolean): Promise<void> {
   await db.execute(
     dsql`INSERT INTO "system_settings" ("key", "value")
