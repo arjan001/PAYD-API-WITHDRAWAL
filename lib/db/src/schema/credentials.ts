@@ -13,7 +13,6 @@ export const credentialsTable = pgTable(
     paydApiSecret: text("payd_api_secret"),
     paydAccountUsername: text("payd_account_username").notNull(),
     isActive: boolean("is_active").notNull().default(false),
-    withdrawalsEnabled: boolean("withdrawals_enabled").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
   },

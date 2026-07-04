@@ -3,49 +3,20 @@ import { sql as dsql } from "drizzle-orm";
 import pg from "pg";
 import * as schema from "./schema";
 
-// ─── Smart SSL pool ───────────────────────────────────────────────────────────
-// Replit's dev PostgreSQL (helium) does NOT support SSL connections.
-// Replit's production PostgreSQL REQUIRES SSL.
-// We cannot distinguish via NODE_ENV (it's "production" in both environments).
-// Solution: try connecting with SSL; if the server reports it doesn't support SSL,
-// fall back to a non-SSL pool. Works transparently in dev and production.
+// ─── Simple SSL pool ───────────────────────────────────────────────────────────
+// Replit's dev PostgreSQL does NOT support SSL connections.
+// Use ssl: false for dev environment.
+// Production uses ssl: { rejectUnauthorized: false } for Replit managed postgres.
 
-let _pool: pg.Pool | null = null;
-let _db: NodePgDatabase<typeof schema> | null = null;
+const isDev = process.env.REPL_ID !== undefined; // REPL_ID is set in Replit dev
+const pool = new pg.Pool({
+  ssl: isDev ? false : { rejectUnauthorized: false },
+});
 
-async function getPool(): Promise<pg.Pool> {
-  if (_pool) return _pool;
+const _db = drizzle(pool, { schema });
 
-  // Try SSL first (production path)
-  const sslPool = new pg.Pool({ ssl: { rejectUnauthorized: false } });
-  try {
-    await sslPool.query("SELECT 1");
-    _pool = sslPool;
-    return _pool;
-  } catch (err: unknown) {
-    const msg = (err as Error).message ?? "";
-    if (msg.includes("does not support SSL")) {
-      // Dev path — server has no SSL listener
-      await sslPool.end().catch(() => undefined);
-      _pool = new pg.Pool({ ssl: false });
-      return _pool;
-    }
-    // Any other error (bad credentials, host unreachable, etc.) — propagate
-    await sslPool.end().catch(() => undefined);
-    throw err;
-  }
-}
-
-async function getDb(): Promise<NodePgDatabase<typeof schema>> {
-  if (_db) return _db;
-  const pool = await getPool();
-  _db = drizzle(pool, { schema });
-  return _db;
-}
-
-// Convenience: synchronous `db` proxy — works after initializeDatabase() resolves
-// (all routes call initializeDatabase on startup before serving requests)
-export let db: NodePgDatabase<typeof schema>;
+// Export the db instance for use in routes
+export const db = _db;
 
 // ─── Auto-setup: idempotent full schema init ──────────────────────────────────
 let _initPromise: Promise<void> | null = null;
@@ -61,12 +32,8 @@ export function initializeDatabase(): Promise<void> {
 }
 
 async function _run(): Promise<void> {
-  const instance = await getDb();
-  // Assign the module-level db so routes can import it synchronously
-  db = instance;
-
   // users
-  await instance.execute(dsql`
+  await db.execute(dsql`
     CREATE TABLE IF NOT EXISTS "users" (
       "id"            serial PRIMARY KEY NOT NULL,
       "name"          text NOT NULL,
@@ -76,12 +43,12 @@ async function _run(): Promise<void> {
       "updated_at"    timestamp with time zone DEFAULT now() NOT NULL
     )
   `);
-  await instance.execute(dsql`
+  await db.execute(dsql`
     CREATE UNIQUE INDEX IF NOT EXISTS "users_email_idx" ON "users" ("email")
   `);
 
   // credentials — one row per user
-  await instance.execute(dsql`
+  await db.execute(dsql`
     CREATE TABLE IF NOT EXISTS "credentials" (
       "id"                    serial PRIMARY KEY NOT NULL,
       "user_id"               integer NOT NULL REFERENCES "users"("id"),
@@ -90,17 +57,16 @@ async function _run(): Promise<void> {
       "payd_api_secret"       text,
       "payd_account_username" text NOT NULL,
       "is_active"             boolean NOT NULL DEFAULT false,
-      "withdrawals_enabled"   boolean NOT NULL DEFAULT false,
       "created_at"            timestamp with time zone DEFAULT now() NOT NULL,
       "updated_at"            timestamp with time zone DEFAULT now() NOT NULL
     )
   `);
-  await instance.execute(dsql`
+  await db.execute(dsql`
     CREATE UNIQUE INDEX IF NOT EXISTS "credentials_user_id_idx" ON "credentials" ("user_id")
   `);
 
   // transactions
-  await instance.execute(dsql`
+  await db.execute(dsql`
     CREATE TABLE IF NOT EXISTS "transactions" (
       "id"                   serial PRIMARY KEY NOT NULL,
       "user_id"              integer REFERENCES "users"("id"),

@@ -235,16 +235,6 @@ router.post("/payd/payout", async (req: Request, res: Response): Promise<void> =
     }
 
     const credRow = await getCredentialRowByUserId(userId);
-    // Check per-user withdrawal toggle
-    if (credRow && !credRow.withdrawalsEnabled) {
-      req.log.warn({ userId }, "Payout blocked: withdrawals disabled for this user");
-      res.status(403).json({
-        error: "Withdrawals disabled",
-        message: "Withdrawals are not enabled for your account. Enable them in Settings.",
-        success: false,
-      });
-      return;
-    }
 
     const { phone_number, amount, currency = "KES", network_code = "MPESA", narration } = parsed.data;
     const callbackUrl = `${getCallbackBase(req)}/api/webhook/payd`;
@@ -256,7 +246,6 @@ router.post("/payd/payout", async (req: Request, res: Response): Promise<void> =
         apiUsername: credRow?.paydUsername ?? null,
         amount,
         callbackUrl,
-        withdrawalsEnabled: credRow?.withdrawalsEnabled ?? null,
       },
       "Initiating payout with user_id credentials",
     );

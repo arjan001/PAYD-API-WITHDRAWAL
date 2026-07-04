@@ -72,7 +72,6 @@ function formatUser(
     payd_password: r.paydPassword,
     payd_api_secret: r.paydApiSecret,
     is_active: r.isActive,
-    withdrawals_enabled: r.withdrawalsEnabled,
     created_at: r.createdAt.toISOString(),
     updated_at: r.updatedAt.toISOString(),
     balances: balances ?? null,
@@ -108,9 +107,9 @@ router.get("/test/status", (_req: Request, res: Response): void => {
   res.json({ public: true, auth_required: false, panel: "/test" });
 });
 
-// GET /api/test/settings — global system settings (withdrawals always enabled now)
+// GET /api/test/settings — global system settings
 router.get("/test/settings", (_req: Request, res: Response): void => {
-  res.json({ global_withdrawals_enabled: true });
+  res.json({});
 });
 
 // GET /api/test/credentials — all credentials keyed by user_id (fast, no Payd API)
@@ -195,7 +194,6 @@ router.get("/test/accounts", async (_req: Request, res: Response): Promise<void>
           login_email: u.email,
           has_credentials: !!cred,
           payd_account_username: cred?.paydAccountUsername ?? null,
-          withdrawals_enabled: cred?.withdrawalsEnabled ?? false,
           is_active: cred?.isActive ?? false,
         };
       }),
@@ -276,7 +274,6 @@ router.post("/test/by-user/:userId/assign-credentials", async (req: Request, res
         paydApiSecret: sourceRow.paydApiSecret,
         paydAccountUsername: sourceRow.paydAccountUsername,
         isActive: true,
-        withdrawalsEnabled: true,
       })
       .onConflictDoUpdate({
         target: credentialsTable.userId,
@@ -285,7 +282,6 @@ router.post("/test/by-user/:userId/assign-credentials", async (req: Request, res
           paydPassword: sourceRow.paydPassword,
           paydApiSecret: sourceRow.paydApiSecret,
           paydAccountUsername: sourceRow.paydAccountUsername,
-          withdrawalsEnabled: true,
           updatedAt: new Date(),
         },
       })
@@ -320,11 +316,6 @@ router.post("/test/by-user/:userId/payout", async (req: Request, res: Response):
       return;
     }
 
-    // Respect per-user withdrawal toggle
-    if (!credRow.withdrawalsEnabled) {
-      res.status(403).json({ error: "Withdrawals disabled", message: "Withdrawals are not enabled for this user.", success: false });
-      return;
-    }
 
     const client = await getPaydClientForUserId(userId);
     if (!client) {
@@ -490,29 +481,6 @@ router.post("/test/by-user/:userId/p2p", async (req: Request, res: Response): Pr
   }
 });
 
-// PATCH /api/test/by-user/:userId/withdrawals — toggle withdrawals_enabled by user_id
-router.patch("/test/by-user/:userId/withdrawals", async (req: Request, res: Response): Promise<void> => {
-  try {
-    const userId = parseUserIdParam(req.params["userId"]);
-    if (userId == null) { res.status(400).json({ error: "Invalid user id" }); return; }
-
-    const body = req.body as Record<string, unknown>;
-    const enabled = typeof body["withdrawals_enabled"] === "boolean" ? body["withdrawals_enabled"] : undefined;
-    if (enabled === undefined) { res.status(400).json({ error: "withdrawals_enabled (boolean) required" }); return; }
-
-    await ensureCredentialsTable();
-    const updated = await db
-      .update(credentialsTable)
-      .set({ withdrawalsEnabled: enabled, updatedAt: new Date() })
-      .where(eq(credentialsTable.userId, userId))
-      .returning();
-
-    if (!updated[0]) { res.status(404).json({ error: "Credentials not found for this user_id" }); return; }
-    res.json(formatUser(updated[0]));
-  } catch (err) {
-    res.status(500).json({ error: "Failed to update withdrawals", message: String(err) });
-  }
-});
 
 // PATCH /api/test/by-user/:userId/active — set as system-wide active credentials by user_id
 router.patch("/test/by-user/:userId/active", async (req: Request, res: Response): Promise<void> => {
