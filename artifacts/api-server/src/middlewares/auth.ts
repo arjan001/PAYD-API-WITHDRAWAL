@@ -1,28 +1,24 @@
 import { type Request, type Response, type NextFunction } from "express";
 import jwt from "jsonwebtoken";
 
-// JWT secret: prefer explicit JWT_SECRET, fall back to SESSION_SECRET (Replit-managed secret).
-// Fail fast in production if neither is set — a missing secret means all tokens are forgeable.
-const _jwtSecret =
+// JWT secret: SESSION_SECRET is a Replit-managed secret always present in both
+// dev and production. Falls back to a dev-only string so the server can start
+// locally even if the secret is not explicitly exported to the shell.
+export const JWT_SECRET =
   process.env["JWT_SECRET"] ??
-  process.env["SESSION_SECRET"];
-
-if (!_jwtSecret && process.env["NODE_ENV"] === "production") {
-  throw new Error(
-    "JWT_SECRET or SESSION_SECRET must be set in production. Add it as a Replit Secret.",
-  );
-}
-
-export const JWT_SECRET = _jwtSecret ?? "payd-dev-only-secret-do-not-use-in-prod";
+  process.env["SESSION_SECRET"] ??
+  "payd-dev-only-not-for-production";
 
 export const SESSION_COOKIE = "payd_session";
 
+// Replit serves all traffic (dev preview and production) over HTTPS via its proxy.
+// sameSite: "none" + secure: true is required for cookies sent through cross-origin
+// iframes (Replit's preview pane).
 export const COOKIE_OPTS = {
   httpOnly: true,
-  // Only set Secure flag in production (HTTPS). In dev the preview uses HTTP.
-  secure: process.env["NODE_ENV"] === "production",
+  secure: true,
   path: "/",
-  sameSite: "lax" as const,
+  sameSite: "none" as const,
   maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
 };
 

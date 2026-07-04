@@ -16,7 +16,7 @@ import {
   InitiateP2PTransferResponse,
   GetTransactionStatusResponse,
 } from "@workspace/api-zod";
-import { db, credentialsTable, transactionsTable, getGlobalWithdrawalsEnabled } from "@workspace/db";
+import { db, credentialsTable, transactionsTable } from "@workspace/db";
 import {
   getPaydClientForUser,
   getCredentialRowByUserId,
@@ -231,18 +231,6 @@ router.post("/payd/payout", async (req: Request, res: Response): Promise<void> =
     const parsed = InitiatePayoutBody.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: parsed.error.message });
-      return;
-    }
-
-    // Check global withdrawal toggle first
-    const globalEnabled = await getGlobalWithdrawalsEnabled();
-    if (!globalEnabled) {
-      req.log.warn({ userId }, "Payout blocked: global withdrawals disabled by admin");
-      res.status(403).json({
-        error: "Withdrawals disabled",
-        message: "Withdrawals are currently disabled system-wide. Please contact an administrator.",
-        success: false,
-      });
       return;
     }
 

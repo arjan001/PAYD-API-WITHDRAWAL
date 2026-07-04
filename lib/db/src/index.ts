@@ -1,21 +1,51 @@
-import { drizzle } from "drizzle-orm/node-postgres";
+import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { sql as dsql } from "drizzle-orm";
 import pg from "pg";
 import * as schema from "./schema";
-export { systemSettingsTable } from "./schema";
 
-// Replit runtime-injects PGHOST, PGPORT, PGUSER, PGPASSWORD, PGDATABASE.
-// pg reads those env vars automatically when no connectionString is given — no URL needed.
-//
-// SSL notes: Replit's managed PostgreSQL (both dev and prod) runs on the same internal host
-// ("helium") and supports SSL with a self-signed/internal certificate. Production REQUIRES
-// SSL; dev accepts but does not require it. Using ssl: { rejectUnauthorized: false }
-// unconditionally works in both environments and avoids any NODE_ENV guessing.
-const pool = new pg.Pool({
-  ssl: { rejectUnauthorized: false },
-});
+// ─── Smart SSL pool ───────────────────────────────────────────────────────────
+// Replit's dev PostgreSQL (helium) does NOT support SSL connections.
+// Replit's production PostgreSQL REQUIRES SSL.
+// We cannot distinguish via NODE_ENV (it's "production" in both environments).
+// Solution: try connecting with SSL; if the server reports it doesn't support SSL,
+// fall back to a non-SSL pool. Works transparently in dev and production.
 
-export const db = drizzle(pool, { schema });
+let _pool: pg.Pool | null = null;
+let _db: NodePgDatabase<typeof schema> | null = null;
+
+async function getPool(): Promise<pg.Pool> {
+  if (_pool) return _pool;
+
+  // Try SSL first (production path)
+  const sslPool = new pg.Pool({ ssl: { rejectUnauthorized: false } });
+  try {
+    await sslPool.query("SELECT 1");
+    _pool = sslPool;
+    return _pool;
+  } catch (err: unknown) {
+    const msg = (err as Error).message ?? "";
+    if (msg.includes("does not support SSL")) {
+      // Dev path — server has no SSL listener
+      await sslPool.end().catch(() => undefined);
+      _pool = new pg.Pool({ ssl: false });
+      return _pool;
+    }
+    // Any other error (bad credentials, host unreachable, etc.) — propagate
+    await sslPool.end().catch(() => undefined);
+    throw err;
+  }
+}
+
+async function getDb(): Promise<NodePgDatabase<typeof schema>> {
+  if (_db) return _db;
+  const pool = await getPool();
+  _db = drizzle(pool, { schema });
+  return _db;
+}
+
+// Convenience: synchronous `db` proxy — works after initializeDatabase() resolves
+// (all routes call initializeDatabase on startup before serving requests)
+export let db: NodePgDatabase<typeof schema>;
 
 // ─── Auto-setup: idempotent full schema init ──────────────────────────────────
 let _initPromise: Promise<void> | null = null;
@@ -31,8 +61,12 @@ export function initializeDatabase(): Promise<void> {
 }
 
 async function _run(): Promise<void> {
-  // 1. users
-  await db.execute(dsql`
+  const instance = await getDb();
+  // Assign the module-level db so routes can import it synchronously
+  db = instance;
+
+  // users
+  await instance.execute(dsql`
     CREATE TABLE IF NOT EXISTS "users" (
       "id"            serial PRIMARY KEY NOT NULL,
       "name"          text NOT NULL,
@@ -42,70 +76,40 @@ async function _run(): Promise<void> {
       "updated_at"    timestamp with time zone DEFAULT now() NOT NULL
     )
   `);
-  await db.execute(dsql`
-    CREATE UNIQUE INDEX IF NOT EXISTS "users_email_idx"
-      ON "users" USING btree ("email")
+  await instance.execute(dsql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "users_email_idx" ON "users" ("email")
   `);
 
-  // 2. credentials — one per user
-  await db.execute(dsql`
+  // credentials — one row per user
+  await instance.execute(dsql`
     CREATE TABLE IF NOT EXISTS "credentials" (
       "id"                    serial PRIMARY KEY NOT NULL,
-      "user_id"               integer REFERENCES "users"("id"),
+      "user_id"               integer NOT NULL REFERENCES "users"("id"),
       "payd_username"         text NOT NULL,
       "payd_password"         text NOT NULL,
       "payd_api_secret"       text,
       "payd_account_username" text NOT NULL,
-      "is_active"             boolean DEFAULT false NOT NULL,
-      "withdrawals_enabled"   boolean DEFAULT false NOT NULL,
+      "is_active"             boolean NOT NULL DEFAULT false,
+      "withdrawals_enabled"   boolean NOT NULL DEFAULT false,
       "created_at"            timestamp with time zone DEFAULT now() NOT NULL,
       "updated_at"            timestamp with time zone DEFAULT now() NOT NULL
     )
   `);
-  await db.execute(dsql`
-    CREATE UNIQUE INDEX IF NOT EXISTS "credentials_user_id_idx"
-      ON "credentials" USING btree ("user_id")
-  `);
-  await db.execute(dsql`DROP INDEX IF EXISTS "credentials_account_username_idx"`);
-  await db.execute(dsql`
-    DO $$ BEGIN
-      ALTER TABLE "credentials" DROP CONSTRAINT IF EXISTS "credentials_payd_account_username_key";
-    EXCEPTION WHEN undefined_object THEN NULL;
-    END $$
-  `);
-  await db.execute(dsql`
-    DO $$ BEGIN
-      ALTER TABLE "credentials" ADD COLUMN "user_id" integer REFERENCES "users"("id");
-    EXCEPTION WHEN duplicate_column THEN NULL;
-    END $$
+  await instance.execute(dsql`
+    CREATE UNIQUE INDEX IF NOT EXISTS "credentials_user_id_idx" ON "credentials" ("user_id")
   `);
 
-  // 3. system_settings
-  await db.execute(dsql`
-    CREATE TABLE IF NOT EXISTS "system_settings" (
-      "id"         serial PRIMARY KEY NOT NULL,
-      "key"        text NOT NULL UNIQUE,
-      "value"      text NOT NULL,
-      "updated_at" timestamp with time zone DEFAULT now() NOT NULL
-    )
-  `);
-  await db.execute(dsql`
-    INSERT INTO "system_settings" ("key", "value")
-    VALUES ('global_withdrawals_enabled', 'true')
-    ON CONFLICT ("key") DO NOTHING
-  `);
-
-  // 4. transactions
-  await db.execute(dsql`
+  // transactions
+  await instance.execute(dsql`
     CREATE TABLE IF NOT EXISTS "transactions" (
       "id"                   serial PRIMARY KEY NOT NULL,
       "user_id"              integer REFERENCES "users"("id"),
       "reference"            text UNIQUE,
       "correlator_id"        text UNIQUE,
       "type"                 text NOT NULL,
-      "status"               text DEFAULT 'pending' NOT NULL,
+      "status"               text NOT NULL DEFAULT 'pending',
       "amount"               numeric(14,2) NOT NULL,
-      "currency"             text DEFAULT 'KES' NOT NULL,
+      "currency"             text NOT NULL DEFAULT 'KES',
       "phone_number"         text,
       "narration"            text,
       "channel"              text,
@@ -120,38 +124,9 @@ async function _run(): Promise<void> {
       "updated_at"           timestamp with time zone DEFAULT now() NOT NULL
     )
   `);
-  await db.execute(dsql`
-    DO $$ BEGIN
-      ALTER TABLE "transactions" ADD COLUMN "user_id" integer REFERENCES "users"("id");
-    EXCEPTION WHEN duplicate_column THEN NULL;
-    END $$
-  `);
 }
 
-export function ensureCredentialsTable(): Promise<void> {
-  return initializeDatabase();
-}
-
-// ─── Global withdrawal toggle ─────────────────────────────────────────────────
-
-export async function getGlobalWithdrawalsEnabled(): Promise<boolean> {
-  try {
-    const rows = await db.execute(
-      dsql`SELECT "value" FROM "system_settings" WHERE "key" = 'global_withdrawals_enabled' LIMIT 1`,
-    );
-    const row = (rows as { rows: Array<{ value: string }> }).rows[0];
-    return row ? row.value !== "false" : true;
-  } catch {
-    return true;
-  }
-}
-
-export async function setGlobalWithdrawalsEnabled(enabled: boolean): Promise<void> {
-  await db.execute(
-    dsql`INSERT INTO "system_settings" ("key", "value")
-         VALUES ('global_withdrawals_enabled', ${enabled ? "true" : "false"})
-         ON CONFLICT ("key") DO UPDATE SET "value" = EXCLUDED."value", "updated_at" = now()`,
-  );
-}
+// Alias kept for call-sites that import by this name
+export const ensureCredentialsTable = initializeDatabase;
 
 export * from "./schema";

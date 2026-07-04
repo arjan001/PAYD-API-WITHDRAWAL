@@ -17,9 +17,7 @@ export const credentialsTable = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
   },
-  (t) => [
-    uniqueIndex("credentials_user_id_idx").on(t.userId),
-  ],
+  (t) => [uniqueIndex("credentials_user_id_idx").on(t.userId)],
 );
 
 export const insertCredentialsSchema = createInsertSchema(credentialsTable).omit({
