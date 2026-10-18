@@ -41,6 +41,7 @@ interface UserRow {
   kes_ledger: number | null;
   usd_available: number | null;
   usd_ledger: number | null;
+  balances?: { currency: string; available_balance: number; ledger_balance: number }[] | null;
   balance_error: string | null;
 }
 

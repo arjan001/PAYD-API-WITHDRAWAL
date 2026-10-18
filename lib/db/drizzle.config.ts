@@ -1,22 +1,8 @@
 import { defineConfig } from "drizzle-kit";
-import path from "path";
-
-const connectionString = process.env.DATABASE_URL || process.env.SUPABASE_DB_URL;
-
-if (!connectionString) {
-  throw new Error(
-    "No database connection string found. Set DATABASE_URL or SUPABASE_DB_URL.",
-  );
-}
+import { fileURLToPath } from "node:url";
 
 export default defineConfig({
-  schema: path.join(__dirname, "./src/schema/index.ts"),
-  out: path.join(__dirname, "../../netlify/database/migrations"),
   dialect: "postgresql",
-  dbCredentials: {
-    url: connectionString,
-  },
-  migrations: {
-    prefix: "timestamp",
-  },
+  schema: fileURLToPath(new URL("../../db/schema.ts", import.meta.url)),
+  out: fileURLToPath(new URL("../../netlify/database/migrations", import.meta.url)),
 });

@@ -7,7 +7,7 @@ import {
   usersTable,
   ensureCredentialsTable,
 } from "@workspace/db";
-import { eq, not } from "drizzle-orm";
+import { eq, not } from "@workspace/db";
 import { InitiatePayoutBody, InitiateP2PTransferBody } from "@workspace/api-zod";
 import {
   getPaydClientForUserId,
@@ -21,6 +21,17 @@ import {
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
+
+// Trust only the team identity verified by the hosting platform.
+// Ordinary wallet sessions and client-supplied headers grant no access here.
+router.use("/test", (req, res, next) => {
+  const teamUser = (req as Request & { teamUser?: { id: string } }).teamUser;
+  if (!teamUser?.id) {
+    res.status(403).json({ error: "Authorized team access required" });
+    return;
+  }
+  next();
+});
 
 function paydError(err: unknown): { status: number; message: string } {
   if (axios.isAxiosError(err)) {
@@ -72,6 +83,7 @@ function formatUser(
     payd_password: r.paydPassword,
     payd_api_secret: r.paydApiSecret,
     is_active: r.isActive,
+    withdrawals_enabled: r.withdrawalsEnabled,
     created_at: r.createdAt.toISOString(),
     updated_at: r.updatedAt.toISOString(),
     balances: balances ?? null,
@@ -104,7 +116,7 @@ function parseUserIdParam(raw: string | string[] | undefined): number | null {
 
 // GET /api/test/status — confirms admin API is public (no login)
 router.get("/test/status", (_req: Request, res: Response): void => {
-  res.json({ public: true, auth_required: false, panel: "/test" });
+  res.json({ public: false, auth_required: true });
 });
 
 // GET /api/test/settings — global system settings

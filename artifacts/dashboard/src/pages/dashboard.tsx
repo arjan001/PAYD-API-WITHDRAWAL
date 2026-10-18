@@ -29,6 +29,9 @@ export default function Dashboard() {
     { query: { queryKey: getGetTransactionsQueryKey({ limit: 5 }), refetchInterval: REFETCH_INTERVAL } }
   );
 
+  const kesBalance = account?.balances.find((balance) => balance.currency === "KES");
+  const usdBalance = account?.balances.find((balance) => balance.currency === "USD");
+
   const isRefreshing = loadingAccount || loadingSummary;
 
   function handleRefresh() {
@@ -85,11 +88,11 @@ export default function Dashboard() {
               <Skeleton className="h-8 w-32" />
             ) : (
               <div className="text-3xl font-bold font-mono tracking-tight">
-                {account?.balances[0] ? formatCurrency(account.balances[0].available_balance, account.balances[0].currency) : '---'}
+                {kesBalance ? formatCurrency(kesBalance.available_balance, kesBalance.currency) : '---'}
               </div>
             )}
             <p className="text-xs text-muted-foreground mt-1">
-              Ledger: {account?.balances[0] ? formatCurrency(account.balances[0].ledger_balance, account.balances[0].currency) : '---'}
+              Ledger: {kesBalance ? formatCurrency(kesBalance.ledger_balance, kesBalance.currency) : '---'}
             </p>
           </CardContent>
         </Card>
@@ -105,11 +108,11 @@ export default function Dashboard() {
               <Skeleton className="h-8 w-32" />
             ) : (
               <div className="text-3xl font-bold font-mono tracking-tight">
-                {account?.balances[1] ? formatCurrency(account.balances[1].available_balance, account.balances[1].currency) : '$ 0.00'}
+                {usdBalance ? formatCurrency(usdBalance.available_balance, usdBalance.currency) : '$ 0.00'}
               </div>
             )}
             <p className="text-xs text-muted-foreground mt-1">
-              Ledger: {account?.balances[1] ? formatCurrency(account.balances[1].ledger_balance, account.balances[1].currency) : '$ 0.00'}
+              Ledger: {usdBalance ? formatCurrency(usdBalance.ledger_balance, usdBalance.currency) : '$ 0.00'}
             </p>
           </CardContent>
         </Card>
