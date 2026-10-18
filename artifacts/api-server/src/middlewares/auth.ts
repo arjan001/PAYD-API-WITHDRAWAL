@@ -7,7 +7,7 @@ import jwt from "jsonwebtoken";
 export const JWT_SECRET =
   process.env["JWT_SECRET"] ??
   process.env["SESSION_SECRET"] ??
-  "payd-dev-only-not-for-production";
+  (process.env.NODE_ENV === "development" ? "payd-dev-only-not-for-production" : undefined);
 
 export const SESSION_COOKIE = "payd_session";
 
@@ -18,7 +18,7 @@ export const COOKIE_OPTS = {
   httpOnly: true,
   secure: true,
   path: "/",
-  sameSite: "none" as const,
+  sameSite: "lax" as const,
   maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
 };
 
@@ -29,10 +29,12 @@ export interface SessionPayload {
 }
 
 export function signToken(payload: SessionPayload): string {
+  if (!JWT_SECRET) throw new Error("Session signing is not configured");
   return jwt.sign(payload, JWT_SECRET, { expiresIn: "7d" });
 }
 
 export function verifyToken(token: string): SessionPayload | null {
+  if (!JWT_SECRET) return null;
   try {
     return jwt.verify(token, JWT_SECRET) as SessionPayload;
   } catch {

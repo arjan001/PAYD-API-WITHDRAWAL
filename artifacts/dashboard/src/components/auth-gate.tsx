@@ -195,6 +195,8 @@ export default function AuthGate({ children }: { children: ReactNode }) {
 
   const logout = async () => {
     await fetch("/api/auth/logout", { method: "POST" });
+    await queryClient.cancelQueries();
+    queryClient.clear();
     setUser(null);
   };
 
@@ -217,7 +219,7 @@ export default function AuthGate({ children }: { children: ReactNode }) {
         onLogin={(u) => {
           // Flush all cached query data so every dashboard query
           // refetches immediately under the new authenticated session.
-          void queryClient.invalidateQueries();
+          queryClient.clear();
           setUser(u);
         }}
       />

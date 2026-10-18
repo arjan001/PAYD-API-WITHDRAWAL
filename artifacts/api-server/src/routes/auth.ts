@@ -1,7 +1,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import bcrypt from "bcryptjs";
 import { db, usersTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq } from "@workspace/db";
 import {
   signToken,
   verifyToken,
@@ -51,7 +51,7 @@ router.post("/auth/register", async (req: Request, res: Response): Promise<void>
     const passwordHash = await bcrypt.hash(password, 12);
     const [user] = await db.insert(usersTable)
       .values({ name, email, passwordHash })
-      .returning({ id: usersTable.id, name: usersTable.name, email: usersTable.email });
+      .returning();
 
     if (!user) { res.status(500).json({ error: "Failed to create account" }); return; }
 

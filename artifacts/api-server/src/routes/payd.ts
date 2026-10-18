@@ -1,6 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import axios from "axios";
-import { desc, eq, count, sum, or, and } from "drizzle-orm";
+import { desc, eq, count, sum, or, and } from "@workspace/db";
 import {
   GetAccountResponse,
   GetTransactionsQueryParams,
@@ -568,36 +568,44 @@ router.get("/payd/summary", async (req: Request, res: Response): Promise<void> =
   }
 });
 
-// POST /api/webhook/payd — receive Payd transaction webhooks (public, no auth)
-router.post("/webhook/payd", async (_req: Request, res: Response): Promise<void> => {
-  const payload = _req.body as Record<string, unknown>;
-  logger.info({ payload }, "Payd webhook received");
-
-  const txRef = (payload["transaction_reference"] ?? null) as string | null;
-  const resultCode = payload["result_code"];
-  const success = resultCode === 0 || payload["success"] === true;
-  const status = success ? "success" : "failed";
-  const remarks = (payload["remarks"] ?? null) as string | null;
-  const thirdPartyTransId = (payload["third_party_trans_id"] ?? null) as string | null;
-
-  if (txRef) {
-    try {
-      await db
-        .update(transactionsTable)
-        .set({ status, remarks, thirdPartyTransId })
-        .where(
-          or(
-            eq(transactionsTable.reference, txRef),
-            eq(transactionsTable.correlatorId, txRef),
-          ),
-        );
-      logger.info({ txRef, status }, "Updated transaction status from webhook");
-    } catch (dbErr) {
-      logger.warn({ dbErr }, "Failed to update transaction from webhook");
-    }
+// Callbacks reconcile status against Payd using the transaction owner's account.
+// Callback payloads alone never authorize changes to a transaction.
+export const webhookRouter: IRouter = Router();
+webhookRouter.post("/webhook/payd", async (req: Request, res: Response): Promise<void> => {
+  const reference = req.body?.transaction_reference;
+  if (typeof reference !== "string" || !reference.trim()) {
+    res.status(400).json({ error: "Transaction reference is required" });
+    return;
   }
-
-  res.status(200).json({ received: true });
+  try {
+    const [transaction] = await db.select().from(transactionsTable).where(or(
+      eq(transactionsTable.reference, reference),
+      eq(transactionsTable.correlatorId, reference),
+    )).limit(1);
+    if (!transaction?.userId) {
+      res.json({ received: true });
+      return;
+    }
+    const client = await getPaydClientForUser(transaction.userId);
+    if (!client) {
+      res.status(503).json({ error: "Unable to verify transaction" });
+      return;
+    }
+    const verified = await client.get<Record<string, unknown>>(`/api/v1/status/${encodeURIComponent(reference)}`);
+    const details = verified["transaction_details"] as Record<string, unknown> | undefined;
+    if (details?.status === "success" || details?.status === "failed") {
+      await db.update(transactionsTable).set({
+        status: details.status,
+        remarks: typeof details.reason === "string" ? details.reason : null,
+      }).where(and(
+        eq(transactionsTable.id, transaction.id),
+        eq(transactionsTable.userId, transaction.userId),
+      ));
+    }
+    res.json({ received: true });
+  } catch {
+    res.status(503).json({ error: "Unable to verify transaction" });
+  }
 });
 
 export default router;

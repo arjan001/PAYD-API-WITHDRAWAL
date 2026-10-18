@@ -5,8 +5,7 @@
 #   • The React/Vite dashboard is built as a static site, served by CDN.
 #   • The Express API runs as a Netlify Function (netlify/functions/api.mts).
 #     All /api/* requests are proxied there automatically.
-#   • PostgreSQL must be an external managed database (Supabase, Neon, etc.)
-#     — set DATABASE_URL in Netlify → Site → Environment Variables.
+#   • Application data uses Netlify Database with deploy-time migrations.
 # ─────────────────────────────────────────────────────────────────────────────
 
 [build]
@@ -16,7 +15,7 @@
   publish  = "artifacts/dashboard/dist/public"
 
 [build.environment]
-  NODE_VERSION = "20"
+  NODE_VERSION = "22"
   PNPM_VERSION = "10"
   NODE_ENV     = "production"
 

@@ -1,7 +1,7 @@
 import axios from "axios";
 import type { Request } from "express";
 import { db, credentialsTable, ensureCredentialsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq } from "@workspace/db";
 import { logger } from "./logger";
 
 const API_BASE = "https://api.payd.money";
